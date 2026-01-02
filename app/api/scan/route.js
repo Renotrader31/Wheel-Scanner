@@ -1,24 +1,56 @@
 // app/api/scan/route.js
-// Scans universe of tickers for Wheel candidates
+// Scans universe of tickers for Wheel candidates with strike suggestions
 
 const WHEEL_UNIVERSE = [
-  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'AMD', 'INTC', 'TSM', 'QCOM',
-  'TSLA', 'F', 'GM', 'JPM', 'BAC', 'WFC', 'GS', 'XOM', 'CVX', 'OXY',
-  'UNH', 'JNJ', 'PFE', 'ABBV', 'MRK', 'DIS', 'NFLX', 'WMT', 'TGT', 'COST',
-  'HD', 'LOW', 'SBUX', 'MCD', 'NKE', 'BA', 'CAT', 'SPY', 'QQQ', 'IWM',
-  'COIN', 'SQ', 'PYPL', 'PLTR', 'SNOW', 'CRM', 'UBER', 'ABNB', 'SOFI', 'HOOD'
+  // Mega-cap Tech
+  'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSM', 'AVGO', 'ORCL',
+  // Semiconductors
+  'AMD', 'INTC', 'QCOM', 'MU', 'AMAT', 'LRCX', 'KLAC', 'ADI', 'MRVL', 'ON',
+  // EV / Auto
+  'TSLA', 'F', 'GM', 'RIVN', 'LCID', 'NIO', 'XPEV', 'LI',
+  // Financials
+  'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'SCHW', 'COF', 'AXP', 'USB',
+  // Energy
+  'XOM', 'CVX', 'OXY', 'SLB', 'HAL', 'DVN', 'MRO', 'VLO', 'PSX', 'EOG',
+  // Healthcare / Pharma
+  'UNH', 'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'BMY', 'GILD', 'AMGN', 'MRNA',
+  // Media / Telecom
+  'DIS', 'NFLX', 'CMCSA', 'T', 'VZ', 'TMUS', 'WBD', 'PARA',
+  // Retail / Consumer
+  'WMT', 'TGT', 'COST', 'HD', 'LOW', 'SBUX', 'MCD', 'NKE', 'LULU', 'TJX',
+  // Industrial
+  'BA', 'CAT', 'DE', 'UPS', 'FDX', 'RTX', 'LMT', 'GE', 'HON', 'MMM',
+  // ETFs
+  'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'XLV', 'XLI', 'ARKK',
+  // Fintech / Payments
+  'COIN', 'SQ', 'PYPL', 'V', 'MA', 'AFRM', 'UPST',
+  // Cloud / SaaS
+  'PLTR', 'SNOW', 'CRM', 'NOW', 'SHOP', 'DDOG', 'NET', 'ZS', 'CRWD', 'MDB',
+  // Gig Economy / Travel
+  'UBER', 'LYFT', 'ABNB', 'BKNG', 'EXPE', 'MAR',
+  // Airlines / Cruise
+  'AAL', 'UAL', 'DAL', 'LUV', 'CCL', 'RCL', 'NCLH',
+  // Meme / High Vol
+  'SOFI', 'HOOD', 'MARA', 'RIOT', 'CLSK', 'GME', 'AMC',
+  // REITs
+  'O', 'SPG', 'AMT', 'PLD',
+  // Other Popular
+  'KO', 'PEP', 'PM', 'MO', 'CL', 'PG', 'WBA', 'CVS'
 ];
 
 const DEFAULT_CONFIG = {
   minPrice: 15,
-  maxPrice: 75,
-  minAvgVolume: 1000000,
-  minMarketCap: 2000000000,
-  minIVRank: 25,
-  maxIVRank: 80,
+  maxPrice: 100,
+  minAvgVolume: 500000,
+  minMarketCap: 1000000000,
+  minIVRank: 20,
+  maxIVRank: 85,
   aboveSMA200: true,
-  minRSI: 35,
-  maxRSI: 65,
+  minRSI: 30,
+  maxRSI: 70,
+  targetDelta: 0.30,
+  minDTE: 20,
+  maxDTE: 45,
   weights: {
     ivRank: 25,
     liquidity: 20,
@@ -32,14 +64,14 @@ function calculateWheelScore(stock, config) {
   const { weights } = config;
   let score = 0;
 
-  // IV Rank Score
-  if (stock.ivRank !== null) {
+  // IV Rank Score - sweet spot is 30-60%
+  if (stock.ivRank !== null && stock.ivRank !== undefined) {
     if (stock.ivRank >= 30 && stock.ivRank <= 60) score += weights.ivRank;
     else if (stock.ivRank >= 25 && stock.ivRank <= 70) score += weights.ivRank * 0.8;
     else if (stock.ivRank >= 20 && stock.ivRank <= 80) score += weights.ivRank * 0.6;
     else score += weights.ivRank * 0.3;
   } else {
-    score += weights.ivRank * 0.5;
+    score += weights.ivRank * 0.4; // Partial if no data
   }
 
   // Liquidity Score
@@ -52,23 +84,26 @@ function calculateWheelScore(stock, config) {
   if (stock.aboveSMA200) score += weights.technical * 0.5;
   if (stock.rsi && stock.rsi >= 40 && stock.rsi <= 60) score += weights.technical * 0.5;
   else if (stock.rsi && stock.rsi >= 35 && stock.rsi <= 65) score += weights.technical * 0.3;
+  else score += weights.technical * 0.1;
 
   // Fundamental Score
-  score += weights.fundamental * (stock.marketCap > 10000000000 ? 1 : 0.7);
+  if (stock.marketCap > 50000000000) score += weights.fundamental;
+  else if (stock.marketCap > 10000000000) score += weights.fundamental * 0.8;
+  else score += weights.fundamental * 0.6;
 
   // Options Liquidity Score
-  if (stock.optionsVolume > 10000) score += weights.optionsLiquidity;
-  else if (stock.optionsVolume > 5000) score += weights.optionsLiquidity * 0.8;
-  else if (stock.optionsVolume > 1000) score += weights.optionsLiquidity * 0.6;
-  else score += weights.optionsLiquidity * 0.4;
+  if (stock.optionsVolume > 50000) score += weights.optionsLiquidity;
+  else if (stock.optionsVolume > 10000) score += weights.optionsLiquidity * 0.8;
+  else if (stock.optionsVolume > 5000) score += weights.optionsLiquidity * 0.6;
+  else score += weights.optionsLiquidity * 0.3;
 
   return Math.round(score);
 }
 
-async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
+async function fetchPolygonData(ticker, POLYGON_KEY) {
   const data = { ticker };
   
-  // Fetch Polygon Quote
+  // Quote
   try {
     const quoteRes = await fetch(
       `https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${POLYGON_KEY}`
@@ -82,13 +117,13 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
       data.avgVolume = q.v;
       data.change = ((q.c - q.o) / q.o * 100).toFixed(2);
     } else {
-      return null; // Skip if no quote
+      return null;
     }
   } catch (e) {
     return null;
   }
 
-  // Fetch Polygon Details
+  // Details
   try {
     const detailsRes = await fetch(
       `https://api.polygon.io/v3/reference/tickers/${ticker}?apiKey=${POLYGON_KEY}`
@@ -104,7 +139,7 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
     data.marketCap = 0;
   }
 
-  // Fetch SMA 200
+  // SMA 200
   try {
     const smaRes = await fetch(
       `https://api.polygon.io/v1/indicators/sma/${ticker}?timespan=day&adjusted=true&window=200&series_type=close&limit=1&apiKey=${POLYGON_KEY}`
@@ -117,7 +152,7 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
     data.aboveSMA200 = true;
   }
 
-  // Fetch RSI
+  // RSI
   try {
     const rsiRes = await fetch(
       `https://api.polygon.io/v1/indicators/rsi/${ticker}?timespan=day&adjusted=true&window=14&series_type=close&limit=1&apiKey=${POLYGON_KEY}`
@@ -130,63 +165,145 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
     data.rsi = null;
   }
 
-  // Fetch UW IV Rank (if key available)
-  data.ivRank = null;
-  data.optionsVolume = 1000; // Default for liquid stocks
-  data.putCallRatio = null;
-  
-  if (UW_KEY) {
-    // Fetch IV Rank - returns array of daily values, grab most recent
-    try {
-      const ivRes = await fetch(
-        `https://api.unusualwhales.com/api/stock/${ticker}/iv-rank`,
-        {
-          headers: {
-            'Authorization': `Bearer ${UW_KEY}`,
-            'Accept': 'application/json'
-          }
-        }
-      );
-      
-      if (ivRes.ok) {
-        const ivData = await ivRes.json();
-        // Data comes as array, get the most recent entry's iv_rank_1y
-        const ivArray = ivData.data || ivData;
-        if (Array.isArray(ivArray) && ivArray.length > 0) {
-          // Get last entry (most recent)
-          const latest = ivArray[ivArray.length - 1];
-          data.ivRank = parseFloat(latest.iv_rank_1y) || null;
-          data.currentIV = parseFloat(latest.volatility) * 100 || null; // Convert to percentage
-        }
-      }
-    } catch (e) {}
+  return data;
+}
 
-    // Fetch options volume - sum put_volume + call_volume
-    try {
-      const volRes = await fetch(
-        `https://api.unusualwhales.com/api/stock/${ticker}/options-volume`,
-        {
-          headers: {
-            'Authorization': `Bearer ${UW_KEY}`,
-            'Accept': 'application/json'
-          }
-        }
-      );
-      
-      if (volRes.ok) {
-        const volData = await volRes.json();
-        const volArray = volData.data || volData;
-        if (Array.isArray(volArray) && volArray.length > 0) {
-          const latest = volArray[0]; // Most recent day
-          const putVol = parseInt(latest.put_volume) || 0;
-          const callVol = parseInt(latest.call_volume) || 0;
-          data.optionsVolume = putVol + callVol;
-          data.putCallRatio = callVol > 0 ? (putVol / callVol).toFixed(2) : null;
-          data.callOI = parseInt(latest.call_open_interest) || 0;
-          data.putOI = parseInt(latest.put_open_interest) || 0;
+async function fetchUWData(ticker, UW_KEY, config) {
+  const data = {
+    ivRank: null,
+    optionsVolume: 1000,
+    putCallRatio: null,
+    suggestedStrike: null
+  };
+
+  if (!UW_KEY) return data;
+
+  // IV Rank
+  try {
+    const ivRes = await fetch(
+      `https://api.unusualwhales.com/api/stock/${ticker}/iv-rank`,
+      {
+        headers: {
+          'Authorization': `Bearer ${UW_KEY}`,
+          'Accept': 'application/json'
         }
       }
-    } catch (e) {}
+    );
+    
+    if (ivRes.ok) {
+      const ivData = await ivRes.json();
+      const ivArray = ivData.data || ivData;
+      if (Array.isArray(ivArray) && ivArray.length > 0) {
+        const latest = ivArray[ivArray.length - 1];
+        data.ivRank = parseFloat(latest.iv_rank_1y) || null;
+        data.currentIV = parseFloat(latest.volatility) * 100 || null;
+      }
+    }
+  } catch (e) {}
+
+  // Delay to avoid rate limiting
+  await new Promise(resolve => setTimeout(resolve, 150));
+
+  // Options Volume
+  try {
+    const volRes = await fetch(
+      `https://api.unusualwhales.com/api/stock/${ticker}/options-volume`,
+      {
+        headers: {
+          'Authorization': `Bearer ${UW_KEY}`,
+          'Accept': 'application/json'
+        }
+      }
+    );
+    
+    if (volRes.ok) {
+      const volData = await volRes.json();
+      const volArray = volData.data || volData;
+      if (Array.isArray(volArray) && volArray.length > 0) {
+        const latest = volArray[0];
+        const putVol = parseInt(latest.put_volume) || 0;
+        const callVol = parseInt(latest.call_volume) || 0;
+        data.optionsVolume = putVol + callVol;
+        data.putCallRatio = callVol > 0 ? (putVol / callVol).toFixed(2) : null;
+      }
+    }
+  } catch (e) {}
+
+  // Delay
+  await new Promise(resolve => setTimeout(resolve, 150));
+
+  // Options Chain for strike suggestion - find ~0.30 delta put
+  try {
+    const chainRes = await fetch(
+      `https://api.unusualwhales.com/api/stock/${ticker}/option-contracts`,
+      {
+        headers: {
+          'Authorization': `Bearer ${UW_KEY}`,
+          'Accept': 'application/json'
+        }
+      }
+    );
+    
+    if (chainRes.ok) {
+      const chainData = await chainRes.json();
+      const options = chainData.data || chainData || [];
+      
+      const targetDelta = config.targetDelta || 0.30;
+      const minDTE = config.minDTE || 20;
+      const maxDTE = config.maxDTE || 45;
+      const today = new Date();
+      
+      let bestPut = null;
+      let bestDeltaDiff = Infinity;
+      
+      for (const opt of options) {
+        // Only look at puts
+        const isPut = opt.option_type === 'put' || 
+                      opt.type === 'put' || 
+                      (opt.option_symbol && opt.option_symbol.includes('P'));
+        if (!isPut) continue;
+        
+        // Check DTE
+        const expStr = opt.expiration_date || opt.expires || opt.expiry;
+        if (!expStr) continue;
+        
+        const expDate = new Date(expStr);
+        const dte = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+        if (dte < minDTE || dte > maxDTE) continue;
+        
+        // Get delta
+        const delta = Math.abs(parseFloat(opt.delta) || 0);
+        if (delta < 0.1 || delta > 0.5) continue;
+        
+        const deltaDiff = Math.abs(delta - targetDelta);
+        
+        if (deltaDiff < bestDeltaDiff) {
+          bestDeltaDiff = deltaDiff;
+          const bid = parseFloat(opt.bid) || 0;
+          const ask = parseFloat(opt.ask) || 0;
+          
+          bestPut = {
+            strike: parseFloat(opt.strike) || parseFloat(opt.strike_price),
+            expiration: expStr,
+            dte: dte,
+            delta: (-delta).toFixed(2),
+            bid: bid.toFixed(2),
+            ask: ask.toFixed(2),
+            mid: ((bid + ask) / 2).toFixed(2),
+            iv: opt.implied_volatility ? (parseFloat(opt.implied_volatility) * 100).toFixed(1) : null,
+            volume: parseInt(opt.volume) || 0,
+            openInterest: parseInt(opt.open_interest) || 0,
+            symbol: opt.option_symbol || opt.symbol
+          };
+        }
+      }
+      
+      if (bestPut) {
+        data.suggestedStrike = bestPut;
+      }
+    }
+  } catch (e) {
+    // Chain endpoint might fail, that's OK
   }
 
   return data;
@@ -205,64 +322,91 @@ export async function POST(request) {
 
   const results = [];
   const skipped = [];
+  const errors = [];
 
-  for (const ticker of WHEEL_UNIVERSE) {
-    const data = await fetchTickerData(ticker, POLYGON_KEY, UW_KEY);
-    
-    if (!data) {
-      skipped.push({ ticker, reason: 'No quote data' });
-      continue;
+  for (let i = 0; i < WHEEL_UNIVERSE.length; i++) {
+    const ticker = WHEEL_UNIVERSE[i];
+
+    try {
+      // Fetch Polygon data
+      const polygonData = await fetchPolygonData(ticker, POLYGON_KEY);
+      
+      if (!polygonData) {
+        skipped.push({ ticker, reason: 'No quote data' });
+        continue;
+      }
+
+      const { price, avgVolume, marketCap } = polygonData;
+
+      // Apply filters
+      if (price < config.minPrice || price > config.maxPrice) {
+        skipped.push({ ticker, reason: `Price $${price.toFixed(2)} outside range` });
+        continue;
+      }
+
+      if (avgVolume < config.minAvgVolume) {
+        skipped.push({ ticker, reason: `Volume ${avgVolume.toLocaleString()} below minimum` });
+        continue;
+      }
+
+      if (config.aboveSMA200 && polygonData.sma200 && !polygonData.aboveSMA200) {
+        skipped.push({ ticker, reason: 'Below 200 SMA' });
+        continue;
+      }
+
+      if (polygonData.rsi && (polygonData.rsi < config.minRSI || polygonData.rsi > config.maxRSI)) {
+        skipped.push({ ticker, reason: `RSI ${polygonData.rsi} outside range` });
+        continue;
+      }
+
+      // Fetch UW data (IV, options volume, strike suggestion)
+      const uwData = await fetchUWData(ticker, UW_KEY, config);
+
+      // Combine data
+      const stockData = {
+        ...polygonData,
+        ...uwData
+      };
+
+      // Calculate score
+      stockData.wheelScore = calculateWheelScore(stockData, config);
+      results.push(stockData);
+
+      // Rate limiting delay
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+    } catch (e) {
+      errors.push({ ticker, error: e.message });
     }
-
-    // Apply filters
-    if (data.price < config.minPrice || data.price > config.maxPrice) {
-      skipped.push({ ticker, reason: `Price $${data.price.toFixed(2)} outside range` });
-      continue;
-    }
-
-    if (data.avgVolume < config.minAvgVolume) {
-      skipped.push({ ticker, reason: `Volume ${data.avgVolume} below minimum` });
-      continue;
-    }
-
-    if (config.aboveSMA200 && data.sma200 && !data.aboveSMA200) {
-      skipped.push({ ticker, reason: 'Below 200 SMA' });
-      continue;
-    }
-
-    if (data.rsi && (data.rsi < config.minRSI || data.rsi > config.maxRSI)) {
-      skipped.push({ ticker, reason: `RSI ${data.rsi} outside range` });
-      continue;
-    }
-
-    // Calculate score
-    data.wheelScore = calculateWheelScore(data, config);
-    results.push(data);
-
-    // Small delay for rate limiting
-    await new Promise(resolve => setTimeout(resolve, 50));
   }
 
-  // Sort by wheel score
+  // Sort by wheel score descending
   results.sort((a, b) => b.wheelScore - a.wheelScore);
 
   return Response.json({
     candidates: results,
     skipped,
+    errors,
     meta: {
       scanned: WHEEL_UNIVERSE.length,
       found: results.length,
       filtered: skipped.length,
-      timestamp: new Date().toISOString()
+      errored: errors.length,
+      timestamp: new Date().toISOString(),
+      config: {
+        priceRange: `$${config.minPrice}-$${config.maxPrice}`,
+        targetDelta: config.targetDelta,
+        dteRange: `${config.minDTE}-${config.maxDTE} days`
+      }
     }
   });
 }
 
-// GET endpoint for quick health check
 export async function GET() {
   return Response.json({
     status: 'ok',
     universe: WHEEL_UNIVERSE.length,
+    tickers: WHEEL_UNIVERSE,
     hasPolygonKey: !!process.env.POLYGON_API_KEY,
     hasUWKey: !!process.env.UW_API_KEY
   });
