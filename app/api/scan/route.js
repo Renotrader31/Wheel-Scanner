@@ -276,17 +276,31 @@ async function fetchStrikeSuggestion(ticker, POLYGON_KEY, config) {
         const expDate = new Date(opt.details?.expiration_date);
         const dte = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
         
+        // Try live quotes first, fall back to last traded price
         const bid = opt.last_quote?.bid || 0;
         const ask = opt.last_quote?.ask || 0;
+        const lastPrice = opt.day?.close || opt.day?.last || 0;
+        
+        // Use mid if we have quotes, otherwise use last traded price
+        let premium = 0;
+        let premiumSource = '';
+        if (bid > 0 && ask > 0) {
+          premium = (bid + ask) / 2;
+          premiumSource = 'mid';
+        } else if (lastPrice > 0) {
+          premium = lastPrice;
+          premiumSource = 'last';
+        }
         
         bestPut = {
           strike: opt.details?.strike_price,
           expiration: opt.details?.expiration_date,
           dte: dte,
           delta: (-delta).toFixed(2),
-          bid: bid.toFixed(2),
-          ask: ask.toFixed(2),
-          mid: ((bid + ask) / 2).toFixed(2),
+          bid: bid > 0 ? bid.toFixed(2) : '-',
+          ask: ask > 0 ? ask.toFixed(2) : '-',
+          mid: premium > 0 ? premium.toFixed(2) : '-',
+          premiumSource: premiumSource,
           iv: opt.implied_volatility ? (opt.implied_volatility * 100).toFixed(1) : null,
           volume: opt.day?.volume || 0,
           openInterest: opt.open_interest || 0,
