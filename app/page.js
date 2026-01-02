@@ -292,6 +292,8 @@ export default function WheelScanner() {
                         <th className="px-4 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('avgVolume')}>
                           Volume {sortConfig.key === 'avgVolume' && (sortConfig.direction === 'desc' ? '↓' : '↑')}
                         </th>
+                        <th className="px-4 py-3 text-right text-gray-400 font-medium">Opt Vol</th>
+                        <th className="px-4 py-3 text-right text-gray-400 font-medium">P/C</th>
                         <th className="px-4 py-3 text-right text-gray-400 font-medium">Mkt Cap</th>
                       </tr>
                     </thead>
@@ -326,6 +328,8 @@ export default function WheelScanner() {
                             }
                           </td>
                           <td className="px-4 py-3 text-right text-gray-300">{formatNumber(stock.avgVolume)}</td>
+                          <td className="px-4 py-3 text-right text-gray-300">{formatNumber(stock.optionsVolume)}</td>
+                          <td className="px-4 py-3 text-right text-gray-300">{stock.putCallRatio || '-'}</td>
                           <td className="px-4 py-3 text-right text-gray-400">{formatNumber(stock.marketCap)}</td>
                         </tr>
                       ))}
