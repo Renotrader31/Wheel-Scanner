@@ -446,15 +446,24 @@ export default function WheelScanner() {
                                     </div>
                                     <div>
                                       <div className="text-gray-500">Bid / Ask</div>
-                                      <div className="text-white font-medium">${stock.suggestedStrike.bid} / ${stock.suggestedStrike.ask}</div>
+                                      <div className="text-white font-medium">
+                                        {stock.suggestedStrike.bid !== '-' ? `$${stock.suggestedStrike.bid}` : '-'} / {stock.suggestedStrike.ask !== '-' ? `$${stock.suggestedStrike.ask}` : '-'}
+                                      </div>
                                     </div>
                                     <div>
-                                      <div className="text-gray-500">Mid</div>
-                                      <div className="text-green-400 font-medium">${stock.suggestedStrike.mid}</div>
+                                      <div className="text-gray-500">
+                                        {stock.suggestedStrike.premiumSource === 'last' ? 'Last Price' : 'Mid'}
+                                      </div>
+                                      <div className="text-green-400 font-medium">
+                                        {stock.suggestedStrike.mid !== '-' ? `$${stock.suggestedStrike.mid}` : '-'}
+                                        {stock.suggestedStrike.premiumSource === 'last' && <span className="text-xs text-gray-500 ml-1">*</span>}
+                                      </div>
                                     </div>
                                     <div>
                                       <div className="text-gray-500">Premium / Contract</div>
-                                      <div className="text-green-400 font-medium">${(parseFloat(stock.suggestedStrike.mid) * 100).toFixed(0)}</div>
+                                      <div className="text-green-400 font-medium">
+                                        {stock.suggestedStrike.mid !== '-' ? `$${(parseFloat(stock.suggestedStrike.mid) * 100).toFixed(0)}` : '-'}
+                                      </div>
                                     </div>
                                   </div>
 
@@ -479,8 +488,13 @@ export default function WheelScanner() {
                                       ${(stock.suggestedStrike.strike * 100).toLocaleString()}
                                     </div>
                                     <div className="text-xs text-gray-500">
-                                      ROC: {((parseFloat(stock.suggestedStrike.mid) / stock.suggestedStrike.strike) * 100).toFixed(2)}%
+                                      ROC: {stock.suggestedStrike.mid !== '-' 
+                                        ? `${((parseFloat(stock.suggestedStrike.mid) / stock.suggestedStrike.strike) * 100).toFixed(2)}%`
+                                        : '-'}
                                     </div>
+                                    {stock.suggestedStrike.premiumSource === 'last' && (
+                                      <div className="text-xs text-yellow-500 mt-1">*Using last traded price</div>
+                                    )}
                                   </div>
                                 </div>
                               </td>
