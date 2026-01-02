@@ -133,8 +133,10 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
   // Fetch UW IV Rank (if key available)
   data.ivRank = null;
   data.optionsVolume = 1000; // Default for liquid stocks
+  data.putCallRatio = null;
   
   if (UW_KEY) {
+    // Fetch IV Rank - returns array of daily values, grab most recent
     try {
       const ivRes = await fetch(
         `https://api.unusualwhales.com/api/stock/${ticker}/iv-rank`,
@@ -148,11 +150,18 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
       
       if (ivRes.ok) {
         const ivData = await ivRes.json();
-        data.ivRank = ivData.data?.iv_rank || ivData.iv_rank || null;
+        // Data comes as array, get the most recent entry's iv_rank_1y
+        const ivArray = ivData.data || ivData;
+        if (Array.isArray(ivArray) && ivArray.length > 0) {
+          // Get last entry (most recent)
+          const latest = ivArray[ivArray.length - 1];
+          data.ivRank = parseFloat(latest.iv_rank_1y) || null;
+          data.currentIV = parseFloat(latest.volatility) * 100 || null; // Convert to percentage
+        }
       }
     } catch (e) {}
 
-    // Fetch options volume
+    // Fetch options volume - sum put_volume + call_volume
     try {
       const volRes = await fetch(
         `https://api.unusualwhales.com/api/stock/${ticker}/options-volume`,
@@ -166,7 +175,16 @@ async function fetchTickerData(ticker, POLYGON_KEY, UW_KEY) {
       
       if (volRes.ok) {
         const volData = await volRes.json();
-        data.optionsVolume = volData.data?.total_volume || volData.total_volume || 1000;
+        const volArray = volData.data || volData;
+        if (Array.isArray(volArray) && volArray.length > 0) {
+          const latest = volArray[0]; // Most recent day
+          const putVol = parseInt(latest.put_volume) || 0;
+          const callVol = parseInt(latest.call_volume) || 0;
+          data.optionsVolume = putVol + callVol;
+          data.putCallRatio = callVol > 0 ? (putVol / callVol).toFixed(2) : null;
+          data.callOI = parseInt(latest.call_open_interest) || 0;
+          data.putOI = parseInt(latest.put_open_interest) || 0;
+        }
       }
     } catch (e) {}
   }
