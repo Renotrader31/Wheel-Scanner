@@ -8,14 +8,19 @@ export default function WheelScanner() {
   const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
   const [lastScan, setLastScan] = useState(null);
+  const [scanMeta, setScanMeta] = useState(null);
   const [view, setView] = useState('scanner');
+  const [expandedRow, setExpandedRow] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'wheelScore', direction: 'desc' });
   const [config, setConfig] = useState({
     minPrice: 15,
-    maxPrice: 75,
-    minRSI: 35,
-    maxRSI: 65,
-    aboveSMA200: true
+    maxPrice: 100,
+    minRSI: 30,
+    maxRSI: 70,
+    aboveSMA200: true,
+    targetDelta: 0.30,
+    minDTE: 20,
+    maxDTE: 45
   });
 
   const testAPI = async () => {
@@ -38,6 +43,7 @@ export default function WheelScanner() {
     setLoading(true);
     setError(null);
     setCandidates([]);
+    setExpandedRow(null);
     
     try {
       const res = await fetch('/api/scan', {
@@ -52,6 +58,7 @@ export default function WheelScanner() {
         setError(data.error);
       } else {
         setCandidates(data.candidates);
+        setScanMeta(data.meta);
         setLastScan(new Date());
         setView('results');
       }
@@ -67,11 +74,15 @@ export default function WheelScanner() {
     setSortConfig({ key, direction });
     
     const sorted = [...candidates].sort((a, b) => {
-      if (a[key] === null) return 1;
-      if (b[key] === null) return -1;
+      if (a[key] === null || a[key] === undefined) return 1;
+      if (b[key] === null || b[key] === undefined) return -1;
       return direction === 'desc' ? b[key] - a[key] : a[key] - b[key];
     });
     setCandidates(sorted);
+  };
+
+  const toggleRow = (ticker) => {
+    setExpandedRow(expandedRow === ticker ? null : ticker);
   };
 
   const formatNumber = (num) => {
@@ -83,10 +94,17 @@ export default function WheelScanner() {
   };
 
   const getScoreColor = (score) => {
-    if (score >= 80) return 'text-green-400';
-    if (score >= 65) return 'text-emerald-400';
-    if (score >= 50) return 'text-yellow-400';
+    if (score >= 85) return 'text-green-400';
+    if (score >= 70) return 'text-emerald-400';
+    if (score >= 55) return 'text-yellow-400';
     return 'text-orange-400';
+  };
+
+  const getScoreBg = (score) => {
+    if (score >= 85) return 'bg-green-500/20';
+    if (score >= 70) return 'bg-emerald-500/20';
+    if (score >= 55) return 'bg-yellow-500/20';
+    return 'bg-orange-500/20';
   };
 
   return (
@@ -99,7 +117,7 @@ export default function WheelScanner() {
               <span className="text-3xl">🎡</span>
               <div>
                 <h1 className="text-xl font-bold text-blue-400">Wheel Strategy Scanner</h1>
-                <p className="text-xs text-gray-500">Polygon + Unusual Whales</p>
+                <p className="text-xs text-gray-500">Polygon + Unusual Whales • 120+ Tickers</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -132,7 +150,7 @@ export default function WheelScanner() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <h2 className="text-lg font-semibold text-blue-400 mb-4">🔧 API Connection Test</h2>
               <p className="text-sm text-gray-400 mb-4">
-                API keys are configured via environment variables on Vercel (POLYGON_API_KEY, UW_API_KEY)
+                API keys are set via Vercel environment variables (POLYGON_API_KEY, UW_API_KEY)
               </p>
               <button
                 onClick={testAPI}
@@ -190,15 +208,48 @@ export default function WheelScanner() {
                   />
                 </div>
               </div>
-              <label className="flex items-center gap-2 mt-4 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.aboveSMA200}
-                  onChange={(e) => setConfig(prev => ({ ...prev, aboveSMA200: e.target.checked }))}
-                  className="w-4 h-4 rounded bg-gray-950 border-gray-700"
-                />
-                <span className="text-sm text-gray-300">Must be above 200 SMA</span>
-              </label>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Target Delta</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={config.targetDelta}
+                    onChange={(e) => setConfig(prev => ({ ...prev, targetDelta: Number(e.target.value) }))}
+                    className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Min DTE</label>
+                  <input
+                    type="number"
+                    value={config.minDTE}
+                    onChange={(e) => setConfig(prev => ({ ...prev, minDTE: Number(e.target.value) }))}
+                    className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Max DTE</label>
+                  <input
+                    type="number"
+                    value={config.maxDTE}
+                    onChange={(e) => setConfig(prev => ({ ...prev, maxDTE: Number(e.target.value) }))}
+                    className="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 cursor-pointer pb-2">
+                    <input
+                      type="checkbox"
+                      checked={config.aboveSMA200}
+                      onChange={(e) => setConfig(prev => ({ ...prev, aboveSMA200: e.target.checked }))}
+                      className="w-4 h-4 rounded bg-gray-950 border-gray-700"
+                    />
+                    <span className="text-sm text-gray-300">Above 200 SMA</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             {/* Scan Button */}
@@ -218,7 +269,7 @@ export default function WheelScanner() {
                     : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-lg shadow-blue-600/20'
                 }`}
               >
-                {loading ? '⏳ Scanning 50 Tickers...' : '🚀 Run Wheel Scan'}
+                {loading ? '⏳ Scanning 120+ Tickers...' : '🚀 Run Wheel Scan'}
               </button>
 
               {lastScan && (
@@ -230,7 +281,7 @@ export default function WheelScanner() {
 
             {/* Scoring Info */}
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-              <h2 className="text-lg font-semibold text-blue-400 mb-4">📈 Wheel Score Components</h2>
+              <h2 className="text-lg font-semibold text-blue-400 mb-4">📈 Wheel Score Components (100 pts max)</h2>
               <div className="grid grid-cols-5 gap-4 text-sm">
                 <div className="bg-gray-950 rounded p-3">
                   <div className="text-gray-500">IV Rank</div>
@@ -255,7 +306,7 @@ export default function WheelScanner() {
                 <div className="bg-gray-950 rounded p-3">
                   <div className="text-gray-500">Options Liquidity</div>
                   <div className="text-white font-semibold">15 pts</div>
-                  <div className="text-xs text-gray-600">Vol &gt; 10K ideal</div>
+                  <div className="text-xs text-gray-600">Opt vol &gt; 50K ideal</div>
                 </div>
               </div>
             </div>
@@ -265,6 +316,37 @@ export default function WheelScanner() {
         {/* Results View */}
         {view === 'results' && (
           <div className="space-y-4">
+            {/* Scan Summary */}
+            {scanMeta && (
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center justify-between">
+                <div className="flex gap-6 text-sm">
+                  <div>
+                    <span className="text-gray-500">Scanned:</span>{' '}
+                    <span className="text-white font-medium">{scanMeta.scanned}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Passed:</span>{' '}
+                    <span className="text-green-400 font-medium">{scanMeta.found}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Filtered:</span>{' '}
+                    <span className="text-yellow-400 font-medium">{scanMeta.filtered}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Target Δ:</span>{' '}
+                    <span className="text-blue-400 font-medium">{config.targetDelta}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">DTE:</span>{' '}
+                    <span className="text-blue-400 font-medium">{config.minDTE}-{config.maxDTE}d</span>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500">
+                  Click row for CSP suggestion
+                </div>
+              </div>
+            )}
+
             {candidates.length === 0 ? (
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-12 text-center">
                 <div className="text-5xl mb-4">🔍</div>
@@ -276,62 +358,144 @@ export default function WheelScanner() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-950">
                       <tr>
-                        <th className="px-4 py-3 text-left text-gray-400 font-medium">#</th>
-                        <th className="px-4 py-3 text-left text-gray-400 font-medium">Ticker</th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('wheelScore')}>
+                        <th className="px-3 py-3 text-left text-gray-400 font-medium w-8">#</th>
+                        <th className="px-3 py-3 text-left text-gray-400 font-medium">Ticker</th>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('wheelScore')}>
                           Score {sortConfig.key === 'wheelScore' && (sortConfig.direction === 'desc' ? '↓' : '↑')}
                         </th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('price')}>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('price')}>
                           Price {sortConfig.key === 'price' && (sortConfig.direction === 'desc' ? '↓' : '↑')}
                         </th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium">RSI</th>
-                        <th className="px-4 py-3 text-center text-gray-400 font-medium">200 SMA</th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('ivRank')}>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium">RSI</th>
+                        <th className="px-3 py-3 text-center text-gray-400 font-medium">SMA</th>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('ivRank')}>
                           IV Rank {sortConfig.key === 'ivRank' && (sortConfig.direction === 'desc' ? '↓' : '↑')}
                         </th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium cursor-pointer hover:text-white" onClick={() => handleSort('avgVolume')}>
-                          Volume {sortConfig.key === 'avgVolume' && (sortConfig.direction === 'desc' ? '↓' : '↑')}
-                        </th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium">Opt Vol</th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium">P/C</th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-medium">Mkt Cap</th>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium">Opt Vol</th>
+                        <th className="px-3 py-3 text-right text-gray-400 font-medium">P/C</th>
+                        <th className="px-3 py-3 text-center text-gray-400 font-medium">CSP</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
                       {candidates.map((stock, idx) => (
-                        <tr key={stock.ticker} className="hover:bg-gray-800/50 transition">
-                          <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
-                          <td className="px-4 py-3">
-                            <span className="font-semibold text-white">{stock.ticker}</span>
-                            {stock.name && <span className="ml-2 text-xs text-gray-500">{stock.name.slice(0, 20)}</span>}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <span className={`font-bold ${getScoreColor(stock.wheelScore)}`}>{stock.wheelScore}</span>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <span className="text-white">${stock.price?.toFixed(2)}</span>
-                            <span className={`ml-2 text-xs ${Number(stock.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {Number(stock.change) >= 0 ? '+' : ''}{stock.change}%
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-gray-300">{stock.rsi || '-'}</td>
-                          <td className="px-4 py-3 text-center">
-                            {stock.aboveSMA200 
-                              ? <span className="text-green-400">✓</span> 
-                              : <span className="text-red-400">✗</span>
-                            }
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            {stock.ivRank 
-                              ? <span className={stock.ivRank >= 30 ? 'text-green-400' : 'text-yellow-400'}>{stock.ivRank.toFixed(0)}%</span>
-                              : <span className="text-gray-500">-</span>
-                            }
-                          </td>
-                          <td className="px-4 py-3 text-right text-gray-300">{formatNumber(stock.avgVolume)}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">{formatNumber(stock.optionsVolume)}</td>
-                          <td className="px-4 py-3 text-right text-gray-300">{stock.putCallRatio || '-'}</td>
-                          <td className="px-4 py-3 text-right text-gray-400">{formatNumber(stock.marketCap)}</td>
-                        </tr>
+                        <>
+                          <tr 
+                            key={stock.ticker} 
+                            className={`hover:bg-gray-800/50 transition cursor-pointer ${expandedRow === stock.ticker ? 'bg-gray-800/30' : ''}`}
+                            onClick={() => toggleRow(stock.ticker)}
+                          >
+                            <td className="px-3 py-3 text-gray-500">{idx + 1}</td>
+                            <td className="px-3 py-3">
+                              <span className="font-semibold text-white">{stock.ticker}</span>
+                              {stock.name && <span className="ml-2 text-xs text-gray-500 hidden md:inline">{stock.name.slice(0, 15)}</span>}
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <span className={`font-bold px-2 py-0.5 rounded ${getScoreColor(stock.wheelScore)} ${getScoreBg(stock.wheelScore)}`}>
+                                {stock.wheelScore}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <span className="text-white">${stock.price?.toFixed(2)}</span>
+                              <span className={`ml-1 text-xs ${Number(stock.change) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {Number(stock.change) >= 0 ? '+' : ''}{stock.change}%
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-right text-gray-300">{stock.rsi || '-'}</td>
+                            <td className="px-3 py-3 text-center">
+                              {stock.aboveSMA200 
+                                ? <span className="text-green-400">✓</span> 
+                                : <span className="text-red-400">✗</span>
+                              }
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              {stock.ivRank 
+                                ? <span className={stock.ivRank >= 30 ? 'text-green-400' : 'text-yellow-400'}>{stock.ivRank.toFixed(0)}%</span>
+                                : <span className="text-gray-500">-</span>
+                              }
+                            </td>
+                            <td className="px-3 py-3 text-right text-gray-300">{formatNumber(stock.optionsVolume)}</td>
+                            <td className="px-3 py-3 text-right text-gray-300">{stock.putCallRatio || '-'}</td>
+                            <td className="px-3 py-3 text-center">
+                              {stock.suggestedStrike ? (
+                                <span className="text-blue-400">📋</span>
+                              ) : (
+                                <span className="text-gray-600">-</span>
+                              )}
+                            </td>
+                          </tr>
+                          
+                          {/* Expanded Strike Suggestion Row */}
+                          {expandedRow === stock.ticker && stock.suggestedStrike && (
+                            <tr key={`${stock.ticker}-details`} className="bg-blue-950/30">
+                              <td colSpan="10" className="px-4 py-4">
+                                <div className="flex items-start gap-8">
+                                  <div>
+                                    <div className="text-xs text-gray-500 mb-1">CSP Suggestion (~{config.targetDelta}Δ)</div>
+                                    <div className="text-lg font-bold text-blue-400">
+                                      Sell {stock.ticker} ${stock.suggestedStrike.strike} Put
+                                    </div>
+                                    <div className="text-sm text-gray-400">
+                                      Exp: {stock.suggestedStrike.expiration} ({stock.suggestedStrike.dte} DTE)
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-4 gap-6 text-sm">
+                                    <div>
+                                      <div className="text-gray-500">Delta</div>
+                                      <div className="text-white font-medium">{stock.suggestedStrike.delta}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-gray-500">Bid / Ask</div>
+                                      <div className="text-white font-medium">${stock.suggestedStrike.bid} / ${stock.suggestedStrike.ask}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-gray-500">Mid</div>
+                                      <div className="text-green-400 font-medium">${stock.suggestedStrike.mid}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-gray-500">Premium / Contract</div>
+                                      <div className="text-green-400 font-medium">${(parseFloat(stock.suggestedStrike.mid) * 100).toFixed(0)}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-3 gap-6 text-sm">
+                                    <div>
+                                      <div className="text-gray-500">IV</div>
+                                      <div className="text-white font-medium">{stock.suggestedStrike.iv || '-'}%</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-gray-500">Volume</div>
+                                      <div className="text-white font-medium">{formatNumber(stock.suggestedStrike.volume)}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-gray-500">OI</div>
+                                      <div className="text-white font-medium">{formatNumber(stock.suggestedStrike.openInterest)}</div>
+                                    </div>
+                                  </div>
+
+                                  <div className="ml-auto text-right">
+                                    <div className="text-gray-500 text-xs">Capital Required</div>
+                                    <div className="text-xl font-bold text-yellow-400">
+                                      ${(stock.suggestedStrike.strike * 100).toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      ROC: {((parseFloat(stock.suggestedStrike.mid) / stock.suggestedStrike.strike) * 100).toFixed(2)}%
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+
+                          {/* No strike data message */}
+                          {expandedRow === stock.ticker && !stock.suggestedStrike && (
+                            <tr key={`${stock.ticker}-details`} className="bg-gray-800/30">
+                              <td colSpan="10" className="px-4 py-4 text-center text-gray-500">
+                                No options chain data available for strike suggestion. Check UW API for this ticker.
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       ))}
                     </tbody>
                   </table>
