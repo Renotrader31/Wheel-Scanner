@@ -168,12 +168,11 @@ async function fetchPolygonData(ticker, POLYGON_KEY) {
   return data;
 }
 
-async function fetchUWData(ticker, UW_KEY, config) {
+async function fetchUWData(ticker, UW_KEY) {
   const data = {
     ivRank: null,
     optionsVolume: 1000,
-    putCallRatio: null,
-    suggestedStrike: null
+    putCallRatio: null
   };
 
   if (!UW_KEY) return data;
@@ -202,7 +201,7 @@ async function fetchUWData(ticker, UW_KEY, config) {
   } catch (e) {}
 
   // Delay to avoid rate limiting
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   // Options Volume
   try {
@@ -229,84 +228,77 @@ async function fetchUWData(ticker, UW_KEY, config) {
     }
   } catch (e) {}
 
-  // Delay
-  await new Promise(resolve => setTimeout(resolve, 150));
+  return data;
+}
 
-  // Options Chain for strike suggestion - find ~0.30 delta put
+// Fetch options chain from Polygon for strike suggestions
+async function fetchStrikeSuggestion(ticker, POLYGON_KEY, config) {
+  const targetDelta = config.targetDelta || 0.30;
+  const minDTE = config.minDTE || 20;
+  const maxDTE = config.maxDTE || 45;
+  const today = new Date();
+  
+  // Calculate target expiration date range
+  const minExpDate = new Date(today);
+  minExpDate.setDate(minExpDate.getDate() + minDTE);
+  const maxExpDate = new Date(today);
+  maxExpDate.setDate(maxExpDate.getDate() + maxDTE);
+  
+  const minExpStr = minExpDate.toISOString().split('T')[0];
+  const maxExpStr = maxExpDate.toISOString().split('T')[0];
+
   try {
+    // Polygon Options Chain Snapshot with filters
     const chainRes = await fetch(
-      `https://api.unusualwhales.com/api/stock/${ticker}/option-contracts`,
-      {
-        headers: {
-          'Authorization': `Bearer ${UW_KEY}`,
-          'Accept': 'application/json'
-        }
-      }
+      `https://api.polygon.io/v3/snapshot/options/${ticker}?contract_type=put&expiration_date.gte=${minExpStr}&expiration_date.lte=${maxExpStr}&limit=250&apiKey=${POLYGON_KEY}`
     );
     
-    if (chainRes.ok) {
-      const chainData = await chainRes.json();
-      const options = chainData.data || chainData || [];
+    if (!chainRes.ok) return null;
+    
+    const chainData = await chainRes.json();
+    const options = chainData.results || [];
+    
+    if (options.length === 0) return null;
+    
+    let bestPut = null;
+    let bestDeltaDiff = Infinity;
+    
+    for (const opt of options) {
+      // Get delta from greeks
+      const delta = Math.abs(opt.greeks?.delta || 0);
+      if (delta < 0.15 || delta > 0.45) continue;
       
-      const targetDelta = config.targetDelta || 0.30;
-      const minDTE = config.minDTE || 20;
-      const maxDTE = config.maxDTE || 45;
-      const today = new Date();
+      const deltaDiff = Math.abs(delta - targetDelta);
       
-      let bestPut = null;
-      let bestDeltaDiff = Infinity;
-      
-      for (const opt of options) {
-        // Only look at puts
-        const isPut = opt.option_type === 'put' || 
-                      opt.type === 'put' || 
-                      (opt.option_symbol && opt.option_symbol.includes('P'));
-        if (!isPut) continue;
+      if (deltaDiff < bestDeltaDiff) {
+        bestDeltaDiff = deltaDiff;
         
-        // Check DTE
-        const expStr = opt.expiration_date || opt.expires || opt.expiry;
-        if (!expStr) continue;
-        
-        const expDate = new Date(expStr);
+        const expDate = new Date(opt.details?.expiration_date);
         const dte = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
-        if (dte < minDTE || dte > maxDTE) continue;
         
-        // Get delta
-        const delta = Math.abs(parseFloat(opt.delta) || 0);
-        if (delta < 0.1 || delta > 0.5) continue;
+        const bid = opt.last_quote?.bid || 0;
+        const ask = opt.last_quote?.ask || 0;
         
-        const deltaDiff = Math.abs(delta - targetDelta);
-        
-        if (deltaDiff < bestDeltaDiff) {
-          bestDeltaDiff = deltaDiff;
-          const bid = parseFloat(opt.bid) || 0;
-          const ask = parseFloat(opt.ask) || 0;
-          
-          bestPut = {
-            strike: parseFloat(opt.strike) || parseFloat(opt.strike_price),
-            expiration: expStr,
-            dte: dte,
-            delta: (-delta).toFixed(2),
-            bid: bid.toFixed(2),
-            ask: ask.toFixed(2),
-            mid: ((bid + ask) / 2).toFixed(2),
-            iv: opt.implied_volatility ? (parseFloat(opt.implied_volatility) * 100).toFixed(1) : null,
-            volume: parseInt(opt.volume) || 0,
-            openInterest: parseInt(opt.open_interest) || 0,
-            symbol: opt.option_symbol || opt.symbol
-          };
-        }
-      }
-      
-      if (bestPut) {
-        data.suggestedStrike = bestPut;
+        bestPut = {
+          strike: opt.details?.strike_price,
+          expiration: opt.details?.expiration_date,
+          dte: dte,
+          delta: (-delta).toFixed(2),
+          bid: bid.toFixed(2),
+          ask: ask.toFixed(2),
+          mid: ((bid + ask) / 2).toFixed(2),
+          iv: opt.implied_volatility ? (opt.implied_volatility * 100).toFixed(1) : null,
+          volume: opt.day?.volume || 0,
+          openInterest: opt.open_interest || 0,
+          symbol: opt.details?.ticker
+        };
       }
     }
+    
+    return bestPut;
   } catch (e) {
-    // Chain endpoint might fail, that's OK
+    return null;
   }
-
-  return data;
 }
 
 export async function POST(request) {
@@ -359,13 +351,17 @@ export async function POST(request) {
         continue;
       }
 
-      // Fetch UW data (IV, options volume, strike suggestion)
-      const uwData = await fetchUWData(ticker, UW_KEY, config);
+      // Fetch UW data (IV, options volume)
+      const uwData = await fetchUWData(ticker, UW_KEY);
+
+      // Fetch strike suggestion from Polygon options chain
+      const suggestedStrike = await fetchStrikeSuggestion(ticker, POLYGON_KEY, config);
 
       // Combine data
       const stockData = {
         ...polygonData,
-        ...uwData
+        ...uwData,
+        suggestedStrike
       };
 
       // Calculate score
