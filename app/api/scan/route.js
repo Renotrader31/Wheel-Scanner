@@ -231,81 +231,154 @@ async function fetchUWData(ticker, UW_KEY) {
   return data;
 }
 
-// Fetch options chain from Polygon for strike suggestions
-async function fetchStrikeSuggestion(ticker, POLYGON_KEY, config) {
+// Fetch strike suggestion using UW greeks endpoint
+async function fetchStrikeSuggestion(ticker, UW_KEY, config) {
+  if (!UW_KEY) return null;
+  
   const targetDelta = config.targetDelta || 0.30;
   const minDTE = config.minDTE || 20;
   const maxDTE = config.maxDTE || 45;
   const today = new Date();
   
-  // Calculate target expiration date range
-  const minExpDate = new Date(today);
-  minExpDate.setDate(minExpDate.getDate() + minDTE);
-  const maxExpDate = new Date(today);
-  maxExpDate.setDate(maxExpDate.getDate() + maxDTE);
-  
-  const minExpStr = minExpDate.toISOString().split('T')[0];
-  const maxExpStr = maxExpDate.toISOString().split('T')[0];
+  const headers = {
+    'Authorization': `Bearer ${UW_KEY}`,
+    'Accept': 'application/json'
+  };
 
   try {
-    // Polygon Options Chain Snapshot with filters
-    const chainRes = await fetch(
-      `https://api.polygon.io/v3/snapshot/options/${ticker}?contract_type=put&expiration_date.gte=${minExpStr}&expiration_date.lte=${maxExpStr}&limit=250&apiKey=${POLYGON_KEY}`
+    // Step 1: Get option chains to find valid expiry dates
+    const chainsRes = await fetch(
+      `https://api.unusualwhales.com/api/stock/${ticker}/option-chains`,
+      { headers }
     );
     
-    if (!chainRes.ok) return null;
+    if (!chainsRes.ok) return null;
     
-    const chainData = await chainRes.json();
-    const options = chainData.results || [];
+    const chainsData = await chainsRes.json();
+    const symbols = chainsData.data || chainsData || [];
     
-    if (options.length === 0) return null;
+    if (symbols.length === 0) return null;
     
+    // Extract unique expiration dates from symbols
+    // Format: GM260116P00073000 -> 260116 -> 2026-01-16
+    const expirySet = new Set();
+    symbols.forEach(sym => {
+      const match = sym.match(/[A-Z]+(\d{6})[CP]/);
+      if (match) {
+        const dateStr = match[1];
+        const year = '20' + dateStr.substring(0, 2);
+        const month = dateStr.substring(2, 4);
+        const day = dateStr.substring(4, 6);
+        expirySet.add(`${year}-${month}-${day}`);
+      }
+    });
+    
+    // Filter to expiries in our DTE range
+    const validExpiries = Array.from(expirySet).filter(exp => {
+      const expDate = new Date(exp);
+      const dte = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+      return dte >= minDTE && dte <= maxDTE;
+    }).sort();
+    
+    if (validExpiries.length === 0) return null;
+    
+    // Step 2: Get greeks for the first valid expiry (closest to minDTE)
+    const targetExpiry = validExpiries[0];
+    
+    await new Promise(r => setTimeout(r, 100)); // Rate limit
+    
+    const greeksRes = await fetch(
+      `https://api.unusualwhales.com/api/stock/${ticker}/greeks?expiry=${targetExpiry}`,
+      { headers }
+    );
+    
+    if (!greeksRes.ok) return null;
+    
+    const greeksData = await greeksRes.json();
+    const strikes = greeksData.data || [];
+    
+    if (strikes.length === 0) return null;
+    
+    // Step 3: Find put with delta closest to target (e.g., -0.30)
     let bestPut = null;
     let bestDeltaDiff = Infinity;
     
-    for (const opt of options) {
-      // Get delta from greeks
-      const delta = Math.abs(opt.greeks?.delta || 0);
-      if (delta < 0.15 || delta > 0.45) continue;
+    for (const strike of strikes) {
+      const putDelta = Math.abs(parseFloat(strike.put_delta) || 0);
+      if (putDelta < 0.15 || putDelta > 0.45) continue;
       
-      const deltaDiff = Math.abs(delta - targetDelta);
+      const deltaDiff = Math.abs(putDelta - targetDelta);
       
       if (deltaDiff < bestDeltaDiff) {
         bestDeltaDiff = deltaDiff;
         
-        const expDate = new Date(opt.details?.expiration_date);
+        const expDate = new Date(strike.expiry);
         const dte = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
         
-        // Try live quotes first, fall back to last traded price
-        const bid = opt.last_quote?.bid || 0;
-        const ask = opt.last_quote?.ask || 0;
-        const lastPrice = opt.day?.close || opt.day?.last || 0;
-        
-        // Use mid if we have quotes, otherwise use last traded price
-        let premium = 0;
-        let premiumSource = '';
-        if (bid > 0 && ask > 0) {
-          premium = (bid + ask) / 2;
-          premiumSource = 'mid';
-        } else if (lastPrice > 0) {
-          premium = lastPrice;
-          premiumSource = 'last';
-        }
+        // Get IV from put_volatility (it's already a decimal like 0.45)
+        const iv = strike.put_volatility ? (parseFloat(strike.put_volatility) * 100).toFixed(1) : null;
         
         bestPut = {
-          strike: opt.details?.strike_price,
-          expiration: opt.details?.expiration_date,
+          strike: parseFloat(strike.strike),
+          expiration: strike.expiry,
           dte: dte,
-          delta: (-delta).toFixed(2),
-          bid: bid > 0 ? bid.toFixed(2) : '-',
-          ask: ask > 0 ? ask.toFixed(2) : '-',
-          mid: premium > 0 ? premium.toFixed(2) : '-',
-          premiumSource: premiumSource,
-          iv: opt.implied_volatility ? (opt.implied_volatility * 100).toFixed(1) : null,
-          volume: opt.day?.volume || 0,
-          openInterest: opt.open_interest || 0,
-          symbol: opt.details?.ticker
+          delta: (-putDelta).toFixed(2),
+          bid: '-',
+          ask: '-',
+          mid: '-',
+          premiumSource: '',
+          iv: iv,
+          volume: 0,
+          openInterest: 0,
+          symbol: strike.put_option_symbol
         };
+      }
+    }
+    
+    // Step 4: If we found a put, try to get pricing from option-contracts
+    if (bestPut) {
+      await new Promise(r => setTimeout(r, 100)); // Rate limit
+      
+      try {
+        const contractsRes = await fetch(
+          `https://api.unusualwhales.com/api/stock/${ticker}/option-contracts`,
+          { headers }
+        );
+        
+        if (contractsRes.ok) {
+          const contractsData = await contractsRes.json();
+          const contracts = contractsData.data || [];
+          
+          // Find matching contract
+          const matchingContract = contracts.find(c => 
+            c.option_symbol === bestPut.symbol
+          );
+          
+          if (matchingContract) {
+            const bid = parseFloat(matchingContract.nbbo_bid) || 0;
+            const ask = parseFloat(matchingContract.nbbo_ask) || 0;
+            const lastPrice = parseFloat(matchingContract.last_price) || 0;
+            
+            let premium = 0;
+            let premiumSource = '';
+            if (bid > 0 && ask > 0) {
+              premium = (bid + ask) / 2;
+              premiumSource = 'mid';
+            } else if (lastPrice > 0) {
+              premium = lastPrice;
+              premiumSource = 'last';
+            }
+            
+            bestPut.bid = bid > 0 ? bid.toFixed(2) : '-';
+            bestPut.ask = ask > 0 ? ask.toFixed(2) : '-';
+            bestPut.mid = premium > 0 ? premium.toFixed(2) : '-';
+            bestPut.premiumSource = premiumSource;
+            bestPut.volume = parseInt(matchingContract.volume) || 0;
+            bestPut.openInterest = parseInt(matchingContract.open_interest) || 0;
+          }
+        }
+      } catch (e) {
+        // Pricing lookup failed, but we still have the strike suggestion
       }
     }
     
@@ -368,8 +441,8 @@ export async function POST(request) {
       // Fetch UW data (IV, options volume)
       const uwData = await fetchUWData(ticker, UW_KEY);
 
-      // Fetch strike suggestion from Polygon options chain
-      const suggestedStrike = await fetchStrikeSuggestion(ticker, POLYGON_KEY, config);
+      // Fetch strike suggestion from UW greeks endpoint
+      const suggestedStrike = await fetchStrikeSuggestion(ticker, UW_KEY, config);
 
       // Combine data
       const stockData = {
