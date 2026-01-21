@@ -139,6 +139,11 @@ const SECTORS = {
   china: {
     name: 'China/ADRs',
     tickers: ['BABA', 'JD', 'PDD', 'BIDU', 'NTES', 'BILI', 'SE', 'GRAB', 'MELI']
+  },
+  
+  emerging_tech: {
+    name: 'Quantum/AI',
+    tickers: ['IONQ', 'RGTI', 'QBTS', 'QUBT', 'AI', 'BBAI', 'SOUN', 'UPST', 'PATH', 'S', 'ALIT']
   }
 };
 
@@ -153,9 +158,9 @@ const PRESETS = {
   },
   
   premium_hunters: {
-    name: 'Premium Hunters (~2 min)',
+    name: 'Premium Hunters (~2.5 min)',
     description: 'High IV sectors for juicy premiums',
-    sectors: ['crypto', 'china', 'auto', 'clean_energy', 'travel']
+    sectors: ['crypto', 'china', 'auto', 'clean_energy', 'travel', 'emerging_tech']
   },
   
   conservative: {
