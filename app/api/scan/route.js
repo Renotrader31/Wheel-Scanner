@@ -188,7 +188,7 @@ function calculateWheelScore(stock, config) {
 async function fetchUWData(ticker, UW_KEY) {
   const data = {
     ivRank: null,
-    optionsVolume: 1000,
+    optionsVolume: null,
     putCallRatio: null
   };
 
@@ -199,7 +199,7 @@ async function fetchUWData(ticker, UW_KEY) {
     'Accept': 'application/json'
   };
 
-  // Fetch IV Rank
+  // Fetch IV Rank from volatility endpoint
   try {
     const ivRes = await fetch(
       `https://api.unusualwhales.com/api/stock/${ticker}/volatility/term-structure`,
@@ -208,21 +208,30 @@ async function fetchUWData(ticker, UW_KEY) {
     
     if (ivRes.ok) {
       const ivData = await ivRes.json();
-      // Try multiple paths for IV rank
-      const ivRankValue = 
-        ivData.data?.iv_rank || 
-        ivData.data?.[0]?.iv_rank_1y ||
-        ivData.iv_rank ||
-        null;
+      // The response is typically an array with iv_rank_1y field
+      let ivRankValue = null;
+      
+      if (Array.isArray(ivData.data) && ivData.data.length > 0) {
+        // Get most recent entry
+        const latest = ivData.data[0];
+        ivRankValue = latest.iv_rank_1y || latest.iv_rank || null;
+      } else if (ivData.data?.iv_rank_1y) {
+        ivRankValue = ivData.data.iv_rank_1y;
+      } else if (ivData.data?.iv_rank) {
+        ivRankValue = ivData.data.iv_rank;
+      } else if (ivData.iv_rank) {
+        ivRankValue = ivData.iv_rank;
+      }
       
       if (ivRankValue !== null) {
-        // Convert to percentage if it's a decimal
-        data.ivRank = ivRankValue > 1 ? ivRankValue : ivRankValue * 100;
+        // Convert to percentage if it's a decimal (0.45 -> 45)
+        const numVal = parseFloat(ivRankValue);
+        data.ivRank = numVal <= 1 ? Math.round(numVal * 100) : Math.round(numVal);
       }
     }
   } catch (e) {}
 
-  // Fetch Options Volume
+  // Fetch Options Volume from options-volume endpoint
   try {
     const volRes = await fetch(
       `https://api.unusualwhales.com/api/stock/${ticker}/options-volume`,
@@ -231,22 +240,36 @@ async function fetchUWData(ticker, UW_KEY) {
     
     if (volRes.ok) {
       const volData = await volRes.json();
-      data.optionsVolume = 
-        volData.data?.call_volume + volData.data?.put_volume ||
-        volData.data?.[0]?.call_volume + volData.data?.[0]?.put_volume ||
-        volData.total_volume ||
-        1000;
-      data.putCallRatio = 
-        volData.data?.put_call_ratio ||
-        volData.data?.[0]?.put_volume / volData.data?.[0]?.call_volume ||
-        null;
+      
+      let callVol = 0;
+      let putVol = 0;
+      
+      // Handle array response (historical data)
+      if (Array.isArray(volData.data) && volData.data.length > 0) {
+        const latest = volData.data[0];
+        callVol = parseInt(latest.call_volume) || 0;
+        putVol = parseInt(latest.put_volume) || 0;
+      } 
+      // Handle object response
+      else if (volData.data) {
+        callVol = parseInt(volData.data.call_volume) || 0;
+        putVol = parseInt(volData.data.put_volume) || 0;
+      }
+      
+      const totalVol = callVol + putVol;
+      data.optionsVolume = totalVol > 0 ? totalVol : null;
+      
+      // Calculate P/C ratio and format to 2 decimals
+      if (callVol > 0 && putVol > 0) {
+        data.putCallRatio = parseFloat((putVol / callVol).toFixed(2));
+      }
     }
   } catch (e) {}
 
   return data;
 }
 
-// Fetch strike suggestion using UW greeks endpoint
+// Fetch strike suggestion using UW greeks endpoint + pricing from option-contracts
 async function fetchStrikeSuggestion(ticker, UW_KEY, config) {
   if (!UW_KEY) return null;
   
@@ -337,8 +360,120 @@ async function fetchStrikeSuggestion(ticker, UW_KEY, config) {
           dte: dte,
           delta: (-putDelta).toFixed(2),
           iv: iv,
-          symbol: strike.put_option_symbol
+          symbol: strike.put_option_symbol,
+          // Initialize pricing fields with defaults
+          bid: null,
+          ask: null,
+          mid: null,
+          lastPrice: null,
+          volume: null,
+          openInterest: null,
+          premiumSource: null
         };
+      }
+    }
+    
+    // Step 4: Fetch pricing data from option-contracts endpoint
+    if (bestPut && bestPut.symbol) {
+      await new Promise(r => setTimeout(r, 100));
+      
+      try {
+        const contractsRes = await fetch(
+          `https://api.unusualwhales.com/api/stock/${ticker}/option-contracts`,
+          { headers }
+        );
+        
+        if (contractsRes.ok) {
+          const contractsData = await contractsRes.json();
+          const contracts = contractsData.data || contractsData || [];
+          
+          // Find matching contract - try multiple field names
+          const matchingContract = contracts.find(c => 
+            c.option_chain_id === bestPut.symbol ||
+            c.option_symbol === bestPut.symbol ||
+            c.symbol === bestPut.symbol
+          );
+          
+          if (matchingContract) {
+            // Parse bid/ask - try multiple field names
+            const bid = parseFloat(matchingContract.nbbo_bid) || 
+                        parseFloat(matchingContract.bid) || 0;
+            const ask = parseFloat(matchingContract.nbbo_ask) || 
+                        parseFloat(matchingContract.ask) || 0;
+            const lastPrice = parseFloat(matchingContract.price) || 
+                              parseFloat(matchingContract.last_price) || 0;
+            
+            // Calculate mid or use last price as fallback
+            let premium = 0;
+            let premiumSource = null;
+            
+            if (bid > 0 && ask > 0) {
+              premium = (bid + ask) / 2;
+              premiumSource = 'mid';
+            } else if (lastPrice > 0) {
+              premium = lastPrice;
+              premiumSource = 'last';
+            }
+            
+            bestPut.bid = bid > 0 ? bid : null;
+            bestPut.ask = ask > 0 ? ask : null;
+            bestPut.mid = premium > 0 ? parseFloat(premium.toFixed(2)) : null;
+            bestPut.lastPrice = lastPrice > 0 ? lastPrice : null;
+            bestPut.volume = parseInt(matchingContract.volume) || null;
+            bestPut.openInterest = parseInt(matchingContract.open_interest) || 
+                                   parseInt(matchingContract.openInterest) || null;
+            bestPut.premiumSource = premiumSource;
+            
+            // Also grab IV from contract if we don't have it
+            if (!bestPut.iv && matchingContract.implied_volatility) {
+              bestPut.iv = (parseFloat(matchingContract.implied_volatility) * 100).toFixed(1);
+            }
+          } else {
+            // Contract not found - try to find by strike + expiry + type
+            const strikeStr = bestPut.strike.toString();
+            const expStr = bestPut.expiration;
+            
+            const fallbackContract = contracts.find(c => {
+              const cStrike = parseFloat(c.strike) || 0;
+              const cExpiry = c.expiry || c.expiration;
+              const cType = (c.option_type || c.type || '').toLowerCase();
+              
+              return Math.abs(cStrike - bestPut.strike) < 0.01 &&
+                     cExpiry === expStr &&
+                     cType === 'put';
+            });
+            
+            if (fallbackContract) {
+              const bid = parseFloat(fallbackContract.nbbo_bid) || 
+                          parseFloat(fallbackContract.bid) || 0;
+              const ask = parseFloat(fallbackContract.nbbo_ask) || 
+                          parseFloat(fallbackContract.ask) || 0;
+              const lastPrice = parseFloat(fallbackContract.price) || 
+                                parseFloat(fallbackContract.last_price) || 0;
+              
+              let premium = 0;
+              let premiumSource = null;
+              
+              if (bid > 0 && ask > 0) {
+                premium = (bid + ask) / 2;
+                premiumSource = 'mid';
+              } else if (lastPrice > 0) {
+                premium = lastPrice;
+                premiumSource = 'last';
+              }
+              
+              bestPut.bid = bid > 0 ? bid : null;
+              bestPut.ask = ask > 0 ? ask : null;
+              bestPut.mid = premium > 0 ? parseFloat(premium.toFixed(2)) : null;
+              bestPut.lastPrice = lastPrice > 0 ? lastPrice : null;
+              bestPut.volume = parseInt(fallbackContract.volume) || null;
+              bestPut.openInterest = parseInt(fallbackContract.open_interest) || null;
+              bestPut.premiumSource = premiumSource;
+            }
+          }
+        }
+      } catch (e) {
+        // Pricing fetch failed, but we still have the strike suggestion
       }
     }
     
