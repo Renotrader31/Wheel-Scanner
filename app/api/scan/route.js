@@ -199,34 +199,27 @@ async function fetchUWData(ticker, UW_KEY) {
     'Accept': 'application/json'
   };
 
-  // Fetch IV Rank from volatility endpoint
+  // Fetch IV Rank from /iv-rank endpoint
   try {
     const ivRes = await fetch(
-      `https://api.unusualwhales.com/api/stock/${ticker}/volatility/term-structure`,
+      `https://api.unusualwhales.com/api/stock/${ticker}/iv-rank`,
       { headers }
     );
     
     if (ivRes.ok) {
       const ivData = await ivRes.json();
-      // The response is typically an array with iv_rank_1y field
-      let ivRankValue = null;
       
+      // Response is { data: [{ iv_rank_1y: "0.65", ... }, ...] }
+      // Get the most recent entry (first in array)
       if (Array.isArray(ivData.data) && ivData.data.length > 0) {
-        // Get most recent entry
         const latest = ivData.data[0];
-        ivRankValue = latest.iv_rank_1y || latest.iv_rank || null;
-      } else if (ivData.data?.iv_rank_1y) {
-        ivRankValue = ivData.data.iv_rank_1y;
-      } else if (ivData.data?.iv_rank) {
-        ivRankValue = ivData.data.iv_rank;
-      } else if (ivData.iv_rank) {
-        ivRankValue = ivData.iv_rank;
-      }
-      
-      if (ivRankValue !== null) {
-        // Convert to percentage if it's a decimal (0.45 -> 45)
-        const numVal = parseFloat(ivRankValue);
-        data.ivRank = numVal <= 1 ? Math.round(numVal * 100) : Math.round(numVal);
+        const ivRankValue = latest.iv_rank_1y || latest.iv_rank || null;
+        
+        if (ivRankValue !== null) {
+          // Convert from decimal to percentage (0.65 -> 65)
+          const numVal = parseFloat(ivRankValue);
+          data.ivRank = numVal <= 1 ? Math.round(numVal * 100) : Math.round(numVal);
+        }
       }
     }
   } catch (e) {}
