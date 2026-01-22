@@ -2,6 +2,15 @@
 
 import { useState } from 'react';
 
+const PRESETS = [
+  { id: 'quick', name: '⚡ Quick Scan', desc: 'Banks, Tech, Auto, Energy, Pharma (~70 tickers)', time: '~2 min' },
+  { id: 'premium_hunters', name: '💰 Premium Hunters', desc: 'Crypto, China, Auto, Clean Energy, Travel, Quantum/AI', time: '~2.5 min' },
+  { id: 'conservative', name: '🛡️ Conservative', desc: 'Banks, Staples, Utilities, Insurance, Telecom', time: '~2 min' },
+  { id: 'growth', name: '🚀 Growth', desc: 'Tech Mega, Semis, Software, Internet, Fintech', time: '~3 min' },
+  { id: 'value', name: '📊 Value', desc: 'Banks, Energy, Industrials, Materials, Aerospace', time: '~2.5 min' },
+  { id: 'income', name: '💵 Income', desc: 'REITs, Utilities, Staples, Telecom, Insurance', time: '~2 min' },
+];
+
 export default function WheelScanner() {
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -12,6 +21,7 @@ export default function WheelScanner() {
   const [view, setView] = useState('scanner');
   const [expandedRow, setExpandedRow] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'wheelScore', direction: 'desc' });
+  const [selectedPreset, setSelectedPreset] = useState('quick');
   const [config, setConfig] = useState({
     minPrice: 15,
     maxPrice: 100,
@@ -49,7 +59,10 @@ export default function WheelScanner() {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config })
+        body: JSON.stringify({ 
+          config,
+          preset: selectedPreset
+        })
       });
       
       const data = await res.json();
@@ -107,6 +120,8 @@ export default function WheelScanner() {
     return 'bg-orange-500/20';
   };
 
+  const currentPreset = PRESETS.find(p => p.id === selectedPreset);
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* Header */}
@@ -117,7 +132,7 @@ export default function WheelScanner() {
               <span className="text-3xl">🎡</span>
               <div>
                 <h1 className="text-xl font-bold text-blue-400">Wheel Strategy Scanner</h1>
-                <p className="text-xs text-gray-500">Polygon + Unusual Whales • 120+ Tickers</p>
+                <p className="text-xs text-gray-500">Polygon + Unusual Whales • Sector-Based Scanning</p>
               </div>
             </div>
             <div className="flex gap-2">
@@ -146,6 +161,30 @@ export default function WheelScanner() {
         {/* Scanner View */}
         {view === 'scanner' && (
           <div className="space-y-6">
+            {/* Preset Selector */}
+            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-blue-400 mb-4">🎯 Scan Preset</h2>
+              <div className="flex flex-col gap-4">
+                <select
+                  value={selectedPreset}
+                  onChange={(e) => setSelectedPreset(e.target.value)}
+                  className="w-full md:w-96 bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-base font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                  {PRESETS.map(preset => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name} ({preset.time})
+                    </option>
+                  ))}
+                </select>
+                
+                {currentPreset && (
+                  <div className="bg-gray-950 rounded-lg px-4 py-3 border border-gray-800">
+                    <div className="text-sm text-gray-400">{currentPreset.desc}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* API Test */}
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
               <h2 className="text-lg font-semibold text-blue-400 mb-4">🔧 API Connection Test</h2>
@@ -269,7 +308,7 @@ export default function WheelScanner() {
                     : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-lg shadow-blue-600/20'
                 }`}
               >
-                {loading ? '⏳ Scanning 120+ Tickers...' : '🚀 Run Wheel Scan'}
+                {loading ? `⏳ Scanning ${currentPreset?.name || 'Sectors'}...` : `🚀 Run ${currentPreset?.name || 'Scan'}`}
               </button>
 
               {lastScan && (
@@ -318,8 +357,8 @@ export default function WheelScanner() {
           <div className="space-y-4">
             {/* Scan Summary */}
             {scanMeta && (
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex items-center justify-between">
-                <div className="flex gap-6 text-sm">
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex flex-wrap gap-4 md:gap-6 text-sm">
                   <div>
                     <span className="text-gray-500">Scanned:</span>{' '}
                     <span className="text-white font-medium">{scanMeta.scanned}</span>
@@ -341,8 +380,13 @@ export default function WheelScanner() {
                     <span className="text-blue-400 font-medium">{config.minDTE}-{config.maxDTE}d</span>
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  Click row for CSP suggestion
+                <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                  {scanMeta.preset && (
+                    <span className="text-xs bg-blue-600/30 text-blue-400 px-2 py-1 rounded">
+                      {PRESETS.find(p => p.id === scanMeta.preset)?.name || scanMeta.preset}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-500">Click row for CSP suggestion</span>
                 </div>
               </div>
             )}
@@ -447,7 +491,7 @@ export default function WheelScanner() {
                                     <div>
                                       <div className="text-gray-500">Bid / Ask</div>
                                       <div className="text-white font-medium">
-                                        {stock.suggestedStrike.bid !== '-' ? `$${stock.suggestedStrike.bid}` : '-'} / {stock.suggestedStrike.ask !== '-' ? `$${stock.suggestedStrike.ask}` : '-'}
+                                        {stock.suggestedStrike.bid !== null ? `$${stock.suggestedStrike.bid}` : '-'} / {stock.suggestedStrike.ask !== null ? `$${stock.suggestedStrike.ask}` : '-'}
                                       </div>
                                     </div>
                                     <div>
@@ -455,14 +499,14 @@ export default function WheelScanner() {
                                         {stock.suggestedStrike.premiumSource === 'last' ? 'Last Price' : 'Mid'}
                                       </div>
                                       <div className="text-green-400 font-medium">
-                                        {stock.suggestedStrike.mid !== '-' ? `$${stock.suggestedStrike.mid}` : '-'}
+                                        {stock.suggestedStrike.mid !== null ? `$${stock.suggestedStrike.mid}` : '-'}
                                         {stock.suggestedStrike.premiumSource === 'last' && <span className="text-xs text-gray-500 ml-1">*</span>}
                                       </div>
                                     </div>
                                     <div>
                                       <div className="text-gray-500">Premium / Contract</div>
                                       <div className="text-green-400 font-medium">
-                                        {stock.suggestedStrike.mid !== '-' ? `$${(parseFloat(stock.suggestedStrike.mid) * 100).toFixed(0)}` : '-'}
+                                        {stock.suggestedStrike.mid !== null ? `$${(parseFloat(stock.suggestedStrike.mid) * 100).toFixed(0)}` : '-'}
                                       </div>
                                     </div>
                                   </div>
@@ -488,7 +532,7 @@ export default function WheelScanner() {
                                       ${(stock.suggestedStrike.strike * 100).toLocaleString()}
                                     </div>
                                     <div className="text-xs text-gray-500">
-                                      ROC: {stock.suggestedStrike.mid !== '-' 
+                                      ROC: {stock.suggestedStrike.mid !== null 
                                         ? `${((parseFloat(stock.suggestedStrike.mid) / stock.suggestedStrike.strike) * 100).toFixed(2)}%`
                                         : '-'}
                                     </div>
